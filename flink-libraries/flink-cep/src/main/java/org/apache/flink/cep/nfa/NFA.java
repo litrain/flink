@@ -44,6 +44,7 @@ import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.guava18.com.google.common.base.Predicate;
 import org.apache.flink.shaded.guava18.com.google.common.collect.Iterators;
+import org.apache.hadoop.yarn.webapp.hamlet.Hamlet;
 
 import javax.annotation.Nullable;
 
@@ -157,6 +158,11 @@ public class NFA<T> implements Serializable {
 	 */
 	private boolean nfaChanged;
 
+	/**
+	 * The group start states' branchVersion.
+	 */
+	private Set<DeweyNumber> livingBranch;
+
 	public NFA(
 			final TypeSerializer<T> eventSerializer,
 			final long windowTime,
@@ -170,6 +176,7 @@ public class NFA<T> implements Serializable {
 		this.computationStates = new LinkedList<>();
 		this.states = new HashSet<>();
 		this.nfaChanged = false;
+		this.livingBranch = new HashSet<>();
 	}
 
 	public Set<State<T>> getStates() {
@@ -217,6 +224,24 @@ public class NFA<T> implements Serializable {
 		this.nfaChanged = false;
 	}
 
+	private DeweyNumber getPreviousBranchVerison(final DeweyNumber branchVersion) {
+		if (branchVersion.length() == 1) {
+			return branchVersion;
+		} else {
+			return branchVersion.subStage().increase(-1);
+		}
+	}
+
+	private boolean inSuperfluousBranch(ComputationState<T> computationState) {
+		if (!livingBranch.contains(getPreviousBranchVerison(computationState.getBranchVersion())) &&
+			!computationState.isBranchEnd()) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+
 	/**
 	 * Processes the next input event. If some of the computations reach a final state then the
 	 * resulting event sequences are returned. If computations time out and timeout handling is
@@ -235,6 +260,8 @@ public class NFA<T> implements Serializable {
 		final int numberComputationStates = computationStates.size();
 		final Collection<Map<String, List<T>>> result = new ArrayList<>();
 		final Collection<Tuple2<Map<String, List<T>>, Long>> timeoutResult = new ArrayList<>();
+
+		final Collection<ComputationState<T>> computationStatesToRetain = new ArrayList<>();
 
 		// iterate over all current computations
 		for (int i = 0; i < numberComputationStates; i++) {
@@ -317,9 +344,12 @@ public class NFA<T> implements Serializable {
 							state.getCounter());
 				}
 			} else {
-				computationStates.addAll(statesToRetain);
+				computationStatesToRetain.addAll(statesToRetain);
 			}
+		}
 
+		for (final ComputationState<T> newComputationState: computationStatesToRetain) {
+			if (!inSuperfluousBranch(newComputationState)) computationStates.add(newComputationState);
 		}
 
 		// prune shared buffer based on window length
@@ -459,23 +489,31 @@ public class NFA<T> implements Serializable {
 		int ignoreBranchesToVisit = outgoingEdges.getTotalIgnoreBranches();
 		int totalTakeToSkip = Math.max(0, outgoingEdges.getTotalTakeBranches() - 1);
 
+		boolean isBranchStart = computationState.getState().isBranchStart();
+
 		final List<ComputationState<T>> resultingComputationStates = new ArrayList<>();
 		for (StateTransition<T> edge : edges) {
 			switch (edge.getAction()) {
+				case PROCEED: {
+
+				}
 				case IGNORE: {
 					if (!computationState.isStartState()) {
 						final DeweyNumber version;
+						final DeweyNumber branchVersion;
 						if (isEquivalentState(edge.getTargetState(), computationState.getState())) {
 							//Stay in the same state (it can be either looping one or singleton)
 							final int toIncrease = calculateIncreasingSelfState(
 								outgoingEdges.getTotalIgnoreBranches(),
 								outgoingEdges.getTotalTakeBranches());
 							version = computationState.getVersion().increase(toIncrease);
+							branchVersion = isBranchStart ? computationState.getBranchVersion().increase(toIncrease) : computationState.getBranchVersion() ;
 						} else {
 							//IGNORE after PROCEED
 							version = computationState.getVersion()
 								.increase(totalTakeToSkip + ignoreBranchesToVisit)
 								.addStage();
+							branchVersion = isBranchStart ? computationState.getBranchVersion().increase(totalTakeToSkip + ignoreBranchesToVisit).addStage() : computationState.getBranchVersion();
 							ignoreBranchesToVisit--;
 						}
 
@@ -487,6 +525,7 @@ public class NFA<T> implements Serializable {
 								computationState.getCounter(),
 								computationState.getTimestamp(),
 								version,
+								branchVersion,
 								computationState.getStartTimestamp()
 						);
 					}
@@ -501,6 +540,7 @@ public class NFA<T> implements Serializable {
 
 					final DeweyNumber currentVersion = computationState.getVersion().increase(takeBranchesToVisit);
 					final DeweyNumber nextVersion = new DeweyNumber(currentVersion).addStage();
+					final DeweyNumber branchVersion = computationState.getBranchVersion().increase(takeBranchesToVisit).addStage();
 					takeBranchesToVisit--;
 
 					final int counter;
@@ -536,6 +576,7 @@ public class NFA<T> implements Serializable {
 							counter,
 							timestamp,
 							nextVersion,
+							branchVersion,
 							startTimestamp);
 
 					//check if newly created state is optional (have a PROCEED path to Final state)
@@ -549,6 +590,7 @@ public class NFA<T> implements Serializable {
 								counter,
 								timestamp,
 								nextVersion,
+								branchVersion,
 								startTimestamp);
 					}
 					break;
@@ -586,9 +628,10 @@ public class NFA<T> implements Serializable {
 			int counter,
 			long timestamp,
 			DeweyNumber version,
+			DeweyNumber branchVersion,
 			long startTimestamp) {
 		ComputationState<T> computationState = ComputationState.createState(
-				this, currentState, previousState, event, counter, timestamp, version, startTimestamp);
+				this, currentState, previousState, event, counter, timestamp, version, branchVersion, startTimestamp);
 		computationStates.add(computationState);
 
 		String originalStateName = NFAStateNameHandler.getOriginalNameFromInternal(previousState.getName());
@@ -644,8 +687,12 @@ public class NFA<T> implements Serializable {
 							case PROCEED:
 								// simply advance the computation state, but apply the current event to it
 								// PROCEED is equivalent to an epsilon transition
-								states.push(stateTransition.getTargetState());
-								break;
+								if (computationState.isBranchStart() || computationState.isBranchEnd()) {
+									outgoingEdges.add(stateTransition);
+								} else {
+									states.push(stateTransition.getTargetState());
+								}
+ 								break;
 							case IGNORE:
 							case TAKE:
 								outgoingEdges.add(stateTransition);

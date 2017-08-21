@@ -266,6 +266,22 @@ public class NFACompiler {
 			return lastSink;
 		}
 
+
+		/**
+		 * Creates the BranchStartState {@link State} of the resulting NFA graph.
+		 * @param sinkState the state that branch start state should point to (always first state of middle states)
+		 * @return created state
+		 */
+		@SuppressWarnings("unchecked")
+		private State<T> createBranchStartState(State<T> sinkState, boolean isBranchPattern) {
+			final State<T> branchStartState = convertPattern(sinkState);
+			if (isBranchPattern) {
+				branchStartState.makeBranchStart();
+			}
+			return branchStartState;
+		}
+
+
 		/**
 		 * Creates the Start {@link State} of the resulting NFA graph.
 		 *
@@ -568,20 +584,38 @@ public class NFACompiler {
 			Pattern<T, ?> oldCurrentPattern = currentPattern;
 			Pattern<T, ?> oldFollowingPattern = followingPattern;
 			GroupPattern<T, ?> oldGroupPattern = currentGroupPattern;
-			State<T> lastSink = sinkState;
+
 			currentGroupPattern = groupPattern;
-			currentPattern = groupPattern.getRawPattern();
-			lastSink = createMiddleStates(lastSink);
-			lastSink = convertPattern(lastSink);
+
+			boolean isBranchPattern = groupPattern.getBranches().size() > 1 &&
+				consumingStrategy != Quantifier.ConsumingStrategy.SKIP_TILL_ANY;
+
+			final State<T> groupEndState = createState(currentPattern.getName(), isBranchPattern ? State.StateType.BranchEnd : State.StateType.Normal);
+			final State<T> groupStartState = createState(currentPattern.getName(), State.StateType.Normal);
+
+			groupEndState.addProceed(sinkState, trueFunction);
+
+			for (Pattern<T, ?> branch : groupPattern.getBranches()) {
+				currentPattern = branch;
+				if (currentPattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.NOT_FOLLOW) {
+					throw new MalformedPatternException("NotFollowedBy is not supported as a last part of a Pattern!");
+				}
+
+				State<T> lastSink = groupEndState;
+				lastSink = createMiddleStates(lastSink);
+				lastSink = createBranchStartState(lastSink, isBranchPattern);
+				groupStartState.addProceed(lastSink, trueFunction);
+			}
+
 			if (isOptional) {
 				// for the first state of a group pattern, its PROCEED edge should point to
 				// the following state of that group pattern
-				lastSink.addProceed(proceedState, trueFunction);
+				groupStartState.addProceed(proceedState, trueFunction);
 			}
 			currentPattern = oldCurrentPattern;
 			followingPattern = oldFollowingPattern;
 			currentGroupPattern = oldGroupPattern;
-			return lastSink;
+			return groupStartState;
 		}
 
 		/**

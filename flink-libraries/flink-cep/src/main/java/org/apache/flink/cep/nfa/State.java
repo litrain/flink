@@ -63,6 +63,14 @@ public class State<T> implements Serializable {
 		return stateType == StateType.Start;
 	}
 
+	public boolean isBranchStart() { return stateType == StateType.Start; }
+
+	public boolean isBranchEnd() { return stateType == StateType.BranchEnd; }
+
+	public void makeBranchStart() { stateType = StateType.BranchStart; }
+
+	public void makeBranchEnd() { stateType = StateType.BranchEnd; }
+
 	public String getName() {
 		return name;
 	}
@@ -145,6 +153,8 @@ public class State<T> implements Serializable {
 		Start, // the state is a starting state for the NFA
 		Final, // the state is a final state for the NFA
 		Normal, // the state is neither a start nor a final state
+		BranchStart, // the state is a start state of a branch in a group pattern
+		BranchEnd, // the state is a end state of a branch in a group
 		Stop
 	}
 

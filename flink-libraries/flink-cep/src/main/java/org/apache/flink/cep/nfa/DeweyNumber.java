@@ -129,6 +129,12 @@ public class DeweyNumber implements Serializable {
 		return new DeweyNumber(newDeweyNumber);
 	}
 
+	public DeweyNumber subStage() {
+		int[] newDeweyNumber = Arrays.copyOf(deweyNumber, deweyNumber.length - 1);
+
+		return new DeweyNumber(newDeweyNumber);
+	}
+
 	@Override
 	public boolean equals(Object obj) {
 		if (obj instanceof DeweyNumber) {

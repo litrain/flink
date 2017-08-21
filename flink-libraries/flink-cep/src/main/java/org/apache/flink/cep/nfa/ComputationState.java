@@ -49,6 +49,9 @@ public class ComputationState<T> {
 	// The current version of the state to discriminate the valid pattern paths in the SharedBuffer
 	private final DeweyNumber version;
 
+	// The current branch version of the state;
+	private final DeweyNumber branchVersion;
+
 	// Timestamp of the first element in the pattern
 	private final long startTimestamp;
 
@@ -57,19 +60,21 @@ public class ComputationState<T> {
 	private final ConditionContext conditionContext;
 
 	private ComputationState(
-			final NFA<T> nfa,
-			final State<T> currentState,
-			final State<T> previousState,
-			final T event,
-			final int counter,
-			final long timestamp,
-			final DeweyNumber version,
-			final long startTimestamp) {
+		final NFA<T> nfa,
+		final State<T> currentState,
+		final State<T> previousState,
+		final T event,
+		final int counter,
+		final long timestamp,
+		final DeweyNumber version,
+		final DeweyNumber branchVersion,
+		final long startTimestamp) {
 		this.state = currentState;
 		this.event = event;
 		this.counter = counter;
 		this.timestamp = timestamp;
 		this.version = version;
+		this.branchVersion = branchVersion;
 		this.startTimestamp = startTimestamp;
 		this.previousState = previousState;
 		this.conditionContext = new ConditionContext(nfa, this);
@@ -86,6 +91,10 @@ public class ComputationState<T> {
 	public boolean isFinalState() {
 		return state.isFinal();
 	}
+
+	public boolean isBranchStart() { return state.isBranchStart(); }
+
+	public boolean isBranchEnd() { return state.isBranchEnd(); }
 
 	public boolean isStartState() {
 		return state.isStart() && event == null;
@@ -115,6 +124,8 @@ public class ComputationState<T> {
 		return version;
 	}
 
+	public DeweyNumber getBranchVersion() { return branchVersion; }
+
 	@Override
 	public boolean equals(Object obj) {
 		if (obj instanceof ComputationState) {
@@ -139,12 +150,17 @@ public class ComputationState<T> {
 
 	public static <T> ComputationState<T> createStartState(final NFA<T> nfa, final State<T> state) {
 		Preconditions.checkArgument(state.isStart());
-		return new ComputationState<>(nfa, state, null, null, 0, -1L, new DeweyNumber(1), -1L);
+		return new ComputationState<>(nfa, state, null, null, 0, -1L, new DeweyNumber(1), new DeweyNumber(0), -1L);
 	}
 
 	public static <T> ComputationState<T> createStartState(final NFA<T> nfa, final State<T> state, final DeweyNumber version) {
 		Preconditions.checkArgument(state.isStart());
-		return new ComputationState<>(nfa, state, null, null, 0, -1L, version, -1L);
+		return new ComputationState<>(nfa, state, null, null, 0, -1L, version, new DeweyNumber(1), -1L);
+	}
+
+	public static <T> ComputationState<T> createStartState(final NFA<T> nfa, final State<T> state, final DeweyNumber version, final DeweyNumber branchVersion) {
+		Preconditions.checkArgument(state.isStart());
+		return new ComputationState<>(nfa, state, null, null, 0, -1L, version, branchVersion, -1L);
 	}
 
 	public static <T> ComputationState<T> createState(
@@ -155,8 +171,9 @@ public class ComputationState<T> {
 			final int counter,
 			final long timestamp,
 			final DeweyNumber version,
+			final DeweyNumber branchVersion,
 			final long startTimestamp) {
-		return new ComputationState<>(nfa, currentState, previousState, event, counter, timestamp, version, startTimestamp);
+		return new ComputationState<>(nfa, currentState, previousState, event, counter, timestamp, version, branchVersion, startTimestamp);
 	}
 
 	public boolean isStopState() {

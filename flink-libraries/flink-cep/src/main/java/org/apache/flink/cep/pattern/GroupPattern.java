@@ -18,7 +18,10 @@
 
 package org.apache.flink.cep.pattern;
 
+import com.google.common.collect.Lists;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
+
+import java.util.List;
 
 /**
  * Base class for a group pattern definition.
@@ -28,20 +31,23 @@ import org.apache.flink.cep.pattern.conditions.IterativeCondition;
  */
 public class GroupPattern<T, F extends T> extends Pattern<T, F> {
 
-	/** Group pattern representing the pattern definition of this group. */
-	private final Pattern<T, ? extends T> groupPattern;
+	/**Representing the branch pattern definitions of the group. */
+	private final List<Pattern<T, ? extends T>> branches;
 
-	GroupPattern(final Pattern<T, ? extends T> previous, final Pattern<T, ? extends T> groupPattern) {
+	GroupPattern(final Pattern<T, ? extends T> previous,
+				 final Pattern<T, ? extends T> first,
+				 final Pattern<T, ? extends T>... branches) {
 		super("GroupPattern", previous);
-		this.groupPattern = groupPattern;
+		this.branches = Lists.asList(first, branches);
 	}
 
 	GroupPattern(
 		final Pattern<T, ? extends T> previous,
-		final Pattern<T, ? extends T> groupPattern,
-		final Quantifier.ConsumingStrategy consumingStrategy) {
+		final Quantifier.ConsumingStrategy consumingStrategy,
+		final Pattern<T, ? extends T> first,
+		final Pattern<T, ? extends T>... branches) {
 		super("GroupPattern", previous, consumingStrategy);
-		this.groupPattern = groupPattern;
+		this.branches = Lists.asList(first, branches);
 	}
 
 	@Override
@@ -59,7 +65,7 @@ public class GroupPattern<T, F extends T> extends Pattern<T, F> {
 		throw new UnsupportedOperationException("GroupPattern does not support subtype clause.");
 	}
 
-	public Pattern<T, ? extends T> getRawPattern() {
-		return groupPattern;
+	public List<Pattern<T, ? extends T>> getBranches() {
+		return branches;
 	}
 }
